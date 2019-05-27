@@ -30,73 +30,88 @@ import java.io.*;
 import java.net.*;
 import java.util.concurrent.*;
 
-// Would normally keep a process block for each process in the multicast group:
-/* class ProcessBlock{
-  int processID;
-  PublicKey pubKey;
-  int port;
-  String IPAddress;
-  } */
+// CDE: Would normally keep a process block for each process in the multicast group:
+class ProcessBlock {
+    int processID;
+    PublicKey pubKey;
+    int port;
+    String IPAddress;
+}
 
-// Ports will incremented by 1000 for each additional process added to the multicast group:
-class Ports{
+// Class to keep track of the ports used by the different servers in the bc application.
+class Ports {
+    // starting point for port number scheme. Port numbers will be given out based on process ID.
     public static int KeyServerPortBase = 6050;
     public static int UnverifiedBlockServerPortBase = 6051;
     public static int BlockchainServerPortBase = 6052;
 
+    // port to send and receive public keys to and from other processes
     public static int KeyServerPort;
+    // port to send and receive unverified blocks
     public static int UnverifiedBlockServerPort;
+    // port to send and receive blockchains
     public static int BlockchainServerPort;
 
-    public void setPorts(){
+    // assigning ports based on arbitrary base ports incremented by process ID x 1000
+    public void setPorts() {
         KeyServerPort = KeyServerPortBase + (bc.PID * 1000);
         UnverifiedBlockServerPort = UnverifiedBlockServerPortBase + (bc.PID * 1000);
         BlockchainServerPort = BlockchainServerPortBase + (bc.PID * 1000);
     }
 }
 
-class PublicKeyWorker extends Thread { // Class definition
-    Socket sock; // Class member, socket, local to Worker.
-    PublicKeyWorker (Socket s) {sock = s;} // Constructor, assign arg s to local sock
-    public void run(){
-        try{
+class PublicKeyWorker extends Thread {
+    Socket sock;
+
+    PublicKeyWorker(Socket s) {
+        sock = s;
+    }
+
+    public void run() {
+        try {
             BufferedReader in = new BufferedReader(new InputStreamReader(sock.getInputStream()));
-            String data = in.readLine ();
+            String data = in.readLine();
             System.out.println("Got key: " + data);
             sock.close();
-        } catch (IOException x){x.printStackTrace();}
+        } catch (IOException x) {
+            x.printStackTrace();
+        }
     }
 }
 
 class PublicKeyServer implements Runnable {
-    //public ProcessBlock[] PBlock = new ProcessBlock[3]; // One block to store info for each process.
+    //public ProcessBlock[] PBlock = new ProcessBlock[3]; // CDE: One block to store info for each process.
 
-    public void run(){
+    public void run() {
+        // setup
         int q_len = 6;
+        // socket to receive public keys from other processes (including self)
         Socket sock;
+        // printing port used to console
         System.out.println("Starting Key Server input thread using " + Integer.toString(Ports.KeyServerPort));
-        try{
+        try {
+            // server socket to accept connections from processes trying to share their public keys
             ServerSocket servsock = new ServerSocket(Ports.KeyServerPort, q_len);
             while (true) {
+                // accepting a socket connection
                 sock = servsock.accept();
-                new PublicKeyWorker (sock).start();
+                new PublicKeyWorker(sock).start();
             }
-        }catch (IOException ioe) {System.out.println(ioe);}
+        } catch (IOException ioe) {
+            System.out.println(ioe);
+        }
     }
 }
 
 class UnverifiedBlockServer implements Runnable {
     BlockingQueue<String> queue;
     UnverifiedBlockServer(BlockingQueue<String> queue){
-        this.queue = queue; // Constructor binds our prioirty queue to the local variable.
+        this.queue = queue;
     }
 
-  /* Inner class to share priority queue. We are going to place the unverified blocks into this queue in the order we get
-     them, but they will be retrieved by a consumer process sorted by blockID. */
-
-    class UnverifiedBlockWorker extends Thread { // Class definition
-        Socket sock; // Class member, socket, local to Worker.
-        UnverifiedBlockWorker (Socket s) {sock = s;} // Constructor, assign arg s to local sock
+    class UnverifiedBlockWorker extends Thread {
+        Socket sock;
+        UnverifiedBlockWorker (Socket s) {sock = s;}
         public void run(){
             try{
                 BufferedReader in = new BufferedReader(new InputStreamReader(sock.getInputStream()));
@@ -109,30 +124,25 @@ class UnverifiedBlockServer implements Runnable {
     }
 
     public void run(){
-        int q_len = 6; /* Number of requests for OpSys to queue */
+        int q_len = 6; /* CDE: Number of requests for OpSys to queue */
         Socket sock;
         System.out.println("Starting the Unverified Block Server input thread using " +
                 Integer.toString(Ports.UnverifiedBlockServerPort));
         try{
             ServerSocket servsock = new ServerSocket(Ports.UnverifiedBlockServerPort, q_len);
             while (true) {
-                sock = servsock.accept(); // Got a new unverified block
-                new UnverifiedBlockWorker(sock).start(); // So start a thread to process it.
+                sock = servsock.accept();
+                new UnverifiedBlockWorker(sock).start();
             }
         }catch (IOException ioe) {System.out.println(ioe);}
     }
 }
 
-/* We have received unverified blocks into a thread-safe concurrent access queue. Just for the example, we retrieve them
-in order according to their blockID. Normally we would retreive the block with the lowest time stamp first, or? This
-is just an example of how to implement such a queue. It must be concurrent safe because two or more threads modifiy it
-"at once," (mutiple worker threads to add to the queue, and consumer thread to remove from it).*/
-
 class UnverifiedBlockConsumer implements Runnable {
     BlockingQueue<String> queue;
     int PID;
     UnverifiedBlockConsumer(BlockingQueue<String> queue){
-        this.queue = queue; // Constructor binds our prioirty queue to the local variable.
+        this.queue = queue;
     }
 
     public void run(){
@@ -144,43 +154,38 @@ class UnverifiedBlockConsumer implements Runnable {
 
         System.out.println("Starting the Unverified Block Priority Queue Consumer thread.\n");
         try{
-            while(true){ // Consume from the incoming queue. Do the work to verify. Mulitcast new blockchain
-                data = queue.take(); // Will blocked-wait on empty queue
+            while(true){
+                data = queue.take();
                 System.out.println("Consumer got unverified: " + data);
 
-                // Ordindarily we would do real work here, based on the incoming data.
-                int j; // Here we fake doing some work (That is, here we could cheat, so not ACTUAL work...)
-                for(int i=0; i< 100; i++){ // put a limit on the fake work for this example
+                int j;
+                for(int i=0; i< 100; i++){
                     j = ThreadLocalRandom.current().nextInt(0,10);
                     try{Thread.sleep(500);}catch(Exception e){e.printStackTrace();}
-                    if (j < 3) break; // <- how hard our fake work is; about 1.5 seconds.
+                    if (j < 3) break;
                 }
 
-	/* With duplicate blocks that have been verified by different procs ordinarily we would keep only the one with
-           the lowest verification timestamp. For the exmple we use a crude filter, which also may let some dups through */
-                if(bc.blockchain.indexOf(data.substring(1, 9)) < 0){ // Crude, but excludes most duplicates.
+                if(bc.blockchain.indexOf(data.substring(1, 9)) < 0){
                     fakeVerifiedBlock = "[" + data + " verified by P" + bc.PID + " at time "
                             + Integer.toString(ThreadLocalRandom.current().nextInt(100,1000)) + "]\n";
                     System.out.println(fakeVerifiedBlock);
-                    String tempblockchain = fakeVerifiedBlock + bc.blockchain; // add the verified block to the chain
-                    for(int i=0; i < bc.numProcesses; i++){ // send to each process in group, including us:
+                    String tempblockchain = fakeVerifiedBlock + bc.blockchain;
+                    for(int i=0; i < bc.numProcesses; i++){
                         sock = new Socket(bc.serverName, Ports.BlockchainServerPortBase + (i * 1000));
                         toServer = new PrintStream(sock.getOutputStream());
-                        toServer.println(tempblockchain); toServer.flush(); // make the multicast
+                        toServer.println(tempblockchain); toServer.flush();
                         sock.close();
                     }
                 }
-                Thread.sleep(1500); // For the example, wait for our blockchain to be updated before processing a new block
+                Thread.sleep(1500);
             }
         }catch (Exception e) {System.out.println(e);}
     }
 }
 
-// Incoming proposed replacement blockchains. Compare to existing. Replace if winner:
-
-class BlockchainWorker extends Thread { // Class definition
-    Socket sock; // Class member, socket, local to Worker.
-    BlockchainWorker (Socket s) {sock = s;} // Constructor, assign arg s to local sock
+class BlockchainWorker extends Thread {
+    Socket sock;
+    BlockchainWorker (Socket s) {sock = s;}
     public void run(){
         try{
             BufferedReader in = new BufferedReader(new InputStreamReader(sock.getInputStream()));
@@ -189,7 +194,7 @@ class BlockchainWorker extends Thread { // Class definition
             while((data2 = in.readLine()) != null){
                 data = data + data2;
             }
-            bc.blockchain = data; // Would normally have to check first for winner before replacing.
+            bc.blockchain = data;
             System.out.println("         --NEW BLOCKCHAIN--\n" + bc.blockchain + "\n\n");
             sock.close();
         } catch (IOException x){x.printStackTrace();}
@@ -198,7 +203,7 @@ class BlockchainWorker extends Thread { // Class definition
 
 class BlockchainServer implements Runnable {
     public void run(){
-        int q_len = 6; /* Number of requests for OpSys to queue */
+        int q_len = 6; /* CDE: Number of requests for OpSys to queue */
         Socket sock;
         System.out.println("Starting the blockchain server input thread using " + Integer.toString(Ports.BlockchainServerPort));
         try{
@@ -211,61 +216,83 @@ class BlockchainServer implements Runnable {
     }
 }
 
-// Class bc for BlockChain
 public class bc {
     static String serverName = "localhost";
     static String blockchain = "[First block]";
-    static int numProcesses = 3; // Set this to match your batch execution file that starts N processes with args 0,1,2,...N
-    static int PID = 0; // Our process ID
+    static int numProcesses = 3;
+    static int PID = 0;
 
-    public void MultiSend (){ // Multicast some data to each of the processes.
+    // send out public key and unverified blocks to other bc processes
+    public void MultiSend (){
+        // this socket will be used to connect to servers in other processes
         Socket sock;
+        // this print stream will be used to write data to other servers
         PrintStream toServer;
 
         try{
-            for(int i=0; i< numProcesses; i++){// Send our key to all servers.
+            // Send out public key to all bc processes' PublicKeyServers (including myself).
+            // We can find their port numbers based on the port numbering scheme using their process IDs
+            /** changing this later i think */
+            for(int i=0; i< numProcesses; i++){
                 sock = new Socket(serverName, Ports.KeyServerPortBase + (i * 1000));
                 toServer = new PrintStream(sock.getOutputStream());
                 toServer.println("FakeKeyProcess" + bc.PID); toServer.flush();
                 sock.close();
             }
-            Thread.sleep(1000); // wait for keys to settle, normally would wait for an ack
-            //Fancy arithmetic is just to generate identifiable blockIDs out of numerical sort order:
+            /***/
+            // pause to make sure all processes received the public keys
+            Thread.sleep(1000);
+            // send unverified blocks to all processes, including myself
+            /** replace this with reading in data and creating unverified blocks to send out */
             String fakeBlockA = "(Block#" + Integer.toString(((bc.PID+1)*10)+4) + " from P"+ bc.PID + ")";
             String fakeBlockB = "(Block#" + Integer.toString(((bc.PID+1)*10)+3) + " from P"+ bc.PID + ")";
-            for(int i=0; i< numProcesses; i++){// Send a sample unverified block A to each server
+            for(int i=0; i< numProcesses; i++){
                 sock = new Socket(serverName, Ports.UnverifiedBlockServerPortBase + (i * 1000));
                 toServer = new PrintStream(sock.getOutputStream());
                 toServer.println(fakeBlockA);
                 toServer.flush();
                 sock.close();
             }
-            for(int i=0; i< numProcesses; i++){// Send a sample unverified block B to each server
+            for(int i=0; i< numProcesses; i++){
                 sock = new Socket(serverName, Ports.UnverifiedBlockServerPortBase + (i * 1000));
                 toServer = new PrintStream(sock.getOutputStream());
                 toServer.println(fakeBlockB);
                 toServer.flush();
                 sock.close();
             }
+            /***/
         }catch (Exception x) {x.printStackTrace ();}
     }
 
     public static void main(String args[]){
-        int q_len = 6; /* Number of requests for OpSys to queue. Not interesting. */
-        PID = (args.length < 1) ? 0 : Integer.parseInt(args[0]); // Process ID
+        int q_len = 6; // setup
+        // if argument present, parse it as the process ID. Otherwise, default to zero
+        PID = (args.length < 1) ? 0 : Integer.parseInt(args[0]);
+        // print user instructions and the process ID for this process
         System.out.println("Clark Elliott's BlockFramework control-c to quit.\n");
         System.out.println("Using processID " + PID + "\n");
 
-        final BlockingQueue<String> queue = new PriorityBlockingQueue<>(); // Concurrent queue for unverified blocks
-        new Ports().setPorts(); // Establish OUR port number scheme, based on PID
+        // Create a thread-safe queue to store unverified blocks.
+        // The UnverifiedBlockServer will put blocks into this queue and the UnverifiedBlockConsumer will remove
+        // blocks from this queue, hence the need for a thread-safe data structure.
+        final BlockingQueue<String> queue = new PriorityBlockingQueue<>();
+        // setting port numbers for PublicKeyServer, UnverifiedBlockServer, and BlockchainServer
+        new Ports().setPorts();
 
-        new Thread(new PublicKeyServer()).start(); // New thread to process incoming public keys
-        new Thread(new UnverifiedBlockServer(queue)).start(); // New thread to process incoming unverified blocks
-        new Thread(new BlockchainServer()).start(); // New thread to process incomming new blockchains
-        try{Thread.sleep(5000);}catch(Exception e){} // Wait for servers to start.
-        new bc().MultiSend(); // Multicast some new unverified blocks out to all servers as data
-        try{Thread.sleep(1000);}catch(Exception e){} // Wait for multicast to fill incoming queue for our example.
+        // starting up PublicKeyServer in a new thread
+        new Thread(new PublicKeyServer()).start();
+        // starting up UnverifiedBlockServer in a new thread, and passing in the queue created above
+        new Thread(new UnverifiedBlockServer(queue)).start();
+        // starting up BlockchainServer in a new thread
+        new Thread(new BlockchainServer()).start();
+        // pause for 5 seconds to make sure other bc processes have started
+        try{Thread.sleep(5000);}catch(Exception e){}
+        // send out public key, unverified blocks
+        new bc().MultiSend();
+        // pause for 1 second to make sure all processes received data
+        try{Thread.sleep(1000);}catch(Exception e){}
 
-        new Thread(new UnverifiedBlockConsumer(queue)).start(); // Start consuming the queued-up unverified blocks
+        // start up UnverifiedBlockConsumer in a new thread
+        new Thread(new UnverifiedBlockConsumer(queue)).start();
     }
 }
